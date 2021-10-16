@@ -11,7 +11,7 @@ use penrose::{
         workspace::Workspace,
         bindings::MouseEvent,
         config::Config,
-        helpers::{spawn, spawn_with_args, spawn_for_output},
+        helpers::spawn_with_args,
         manager::WindowManager,
         layout::{bottom_stack, monocle, side_stack, Layout, LayoutConf},
         ring::Selector,
@@ -22,10 +22,18 @@ use penrose::{
     Backward, Forward, Less, More,
 };
 use simplelog::{LevelFilter, SimpleLogger};
-use std::convert::TryFrom;
+use std::{
+    // io::Read,
+    // process::{Command, Stdio},
+    convert::TryFrom,
+    collections::HashMap,
+    thread, time, env,
+};
 // use dirs::home_dir;
 mod hooks;
-use hooks::CenterFloat;
+use hooks::{CenterFloat, StartupScript};
+mod layouts;
+use layouts::dwindle;
 
 const HEIGHT: usize = 18;
 
@@ -37,13 +45,6 @@ const WHITE: u32 = 0xebdbb2ff;
 // const PURPLE: u32 = 0xb16286ff;
 const BLUE: u32 = 0x458588ff;
 // const RED: u32 = 0xcc241dff;
-
-use std::{
-    // io::Read,
-    // process::{Command, Stdio},
-    collections::HashMap,
-    env,
-};
 
 
 // fn spawn_for_output_with_args<S: Into<String>>(cmd: S, args: &[&str]) -> penrose::Result<String> {
@@ -84,7 +85,8 @@ fn show_window_text(
             xcb::WINDOW_CLASS_COPY_FROM_PARENT as u16,
             xcb::base::COPY_FROM_PARENT,
             &[(xcb::xproto::CW_BACK_PIXEL, 0xff000000),
-              (xcb::xproto::CW_EVENT_MASK, xcb::xproto::EVENT_MASK_EXPOSURE)]
+              (xcb::xproto::CW_EVENT_MASK,
+               xcb::xproto::EVENT_MASK_EXPOSURE)]
         );
         xcb::xproto::map_window(conn, window);
         conn.flush();
@@ -128,16 +130,17 @@ fn main() -> penrose::Result<()> {
     let config = Config::default()
         .builder()
         .workspaces(vec!["1", "2", "3", "4", "5", "6", "7", "8", "9"])
-        .floating_classes(vec!["rofi", "dmenu", "dunst", "yad"])
+        .floating_classes(vec!["rofi", "dmenu", "dunst", "yad", "gcr-prompter"])
         .layouts(vec![
             Layout::new("[side]", LayoutConf::default(), side_stack, 1, 0.6),
-            Layout::new("[botm]", LayoutConf::default(), bottom_stack, 1, 0.6),
             Layout::new("[mono]", LayoutConf{
                 floating: false, gapless: true, follow_focus: true, allow_wrapping: true,
             }, monocle, 1, 0.6),
             Layout::new("[papr]", LayoutConf{
                 floating: false, gapless: true, follow_focus: true, allow_wrapping: false,
             }, paper, 1, 0.6),
+            Layout::new("[dwdl]", LayoutConf::default(), dwindle, 1, 0.6),
+            Layout::new("[botm]", LayoutConf::default(), bottom_stack, 1, 0.6),
         ])
         .build()
         .unwrap();
@@ -159,6 +162,7 @@ fn main() -> penrose::Result<()> {
     let sp_term = Scratchpad::new("alacritty", 0.8, 0.8);
 
     let hooks: XcbHooks = vec![
+        Box::new(StartupScript::new()),
         sp_term.get_hook(),
         Box::new(bar),
         CenterFloat::new(config.floating_classes().clone(), 0.9),
@@ -180,95 +184,207 @@ fn main() -> penrose::Result<()> {
         "M-k" => run_internal!(cycle_client, Backward);
         "M-l" => run_internal!(cycle_screen, cycle_screen_direction);
         "M-h" => run_internal!(cycle_screen, cycle_screen_direction.reverse());
-        // "M-l" => run_internal!(rotate_clients, Forward);
-        // "M-h" => run_internal!(rotate_clients, Backward);
         "M-S-j" => run_internal!(drag_client, Forward);
         "M-S-k" => run_internal!(drag_client, Backward);
+        "M-S-l" => run_internal!(drag_workspace, cycle_screen_direction);
+        "M-S-h" => run_internal!(drag_workspace, cycle_screen_direction.reverse());
+        // "M-S-i" => Box::new(|wm: &mut WindowManager<_>| {
+        //     let _ = wm.rotate_clients(Forward);
+        //     Ok(())
+        // });
+        // "M-S-u" => Box::new(|wm: &mut WindowManager<_>| {
+        //     let _ = wm.rotate_clients(Backward);
+        //     Ok(())
+        // });
+        // "M-o" => Box::new(|wm: &mut WindowManager<_>| {
+        //     let mut client_ids: Vec<String> = vec![];
+        //     for workspace_index in wm.focused_workspaces().iter()
+        //     {
+        //         if let Some(workspace) = wm.workspace(
+        //             &Selector::Index(*workspace_index))
+        //         {
+        //             for client_id in workspace.client_ids().iter() {
+        //                 client_ids.push(client_id.to_string());
+        //             }
+        //         }
+        //     }
+        //     let _ = spawn_with_args(
+        //         "easyfocus_penrose",
+        //         &client_ids.iter().map(|s| &**s).collect::<Vec<&str>>());
+        //     Ok(())
+        // });
         "M-o" => Box::new(|wm: &mut WindowManager<_>| {
-            if let Ok((conn, _)) = xcb::Connection::connect(None) {
-                let mut letters = String::from("0987654321nbmvcxzytpoiurewqhglkjfdsa");
-                let mut window_text_ids: Vec<WinId> = vec![];
-                let mut client_ids:HashMap<char, WinId> = HashMap::new();
-                for workspace_index in wm.focused_workspaces().iter()
+            let focused_client_id = wm.focused_client_id();
+            let (conn, screen_i) = match xcb::Connection::connect(None)
+            {
+                Ok(x) => x,
+                Err(_) => return Ok(()),
+            };
+            let root = match conn.get_setup().roots().nth(
+                screen_i as usize)
+            {
+                Some(screen) => screen.root(),
+                None => return Ok(()),
+            };
+            {
+                let mut iters = 50;
+                let millis = time::Duration::from_millis(10);
+                loop
                 {
-                    if let Some(workspace) = wm.workspace(&Selector::Index(*workspace_index))
-                    {
-                        for client_id in workspace.client_ids().iter() {
-                            if let Some(letter) = letters.pop()
-                            {
-                                if let Some(window_text_id) = show_window_text(
-                                    &conn, *client_id, letter.to_string().as_str())
-                                {
-                                    window_text_ids.push(window_text_id);
-                                    client_ids.insert(letter, *client_id);
-                                }
-                            } else {
-                                break;
-                            }
+                    if let Ok(reply) = xcb::grab_keyboard(
+                        &conn,
+                        true,
+                        root,
+                        xcb::CURRENT_TIME,
+                        xcb::GRAB_MODE_ASYNC as u8,
+                        xcb::GRAB_MODE_ASYNC as u8,
+                    ).get_reply() {
+                        if reply.status() == xcb::GRAB_STATUS_SUCCESS as u8 {
+                            break;
                         }
+                    };
+                    thread::sleep(millis);
+                    iters -= 1;
+                    if iters <= 0
+                    {
+                        return Ok(());
                     }
                 }
-                let choice_result = spawn_for_output("rofi-getch");
-                // let window = conn.generate_id();
-                // let screen = conn.get_setup().roots().nth(screen_i as usize).unwrap();
-                // xcb::create_window(
-                //     &conn,
-                //     xcb::COPY_FROM_PARENT as u8,
-                //     window,
-                //     screen.root(),
-                //     0,
-                //     0,
-                //     150,
-                //     150,
-                //     10,
-                //     xcb::WINDOW_CLASS_INPUT_OUTPUT as u16,
-                //     screen.root_visual(),
-                //     &[
-                //         (xcb::CW_BACK_PIXEL, screen.white_pixel()),
-                //         (
-                //             xcb::CW_EVENT_MASK,
-                //             xcb::EVENT_MASK_EXPOSURE | xcb::EVENT_MASK_KEY_PRESS,
-                //         ),
-                //     ],
-                // );
-                // xcb::map_window(&conn, window);
-                // conn.flush();
-                // loop {
-                //     let ev = conn.wait_for_event();
-                //     if let Some(ev) = ev {
-                //         if ev.response_type() == xcb::KEY_PRESS as u8 {
-                //             let key: &xcb::KeyPressEvent = unsafe { xcb::cast_event(&ev) };
-                //             println!("Key {}", key.detail());
-                //             if key.detail() as char == 'M' {
-                //                 println!("M matched")
-                //             }
-                //             if key.detail() as char == 'm' {
-                //                 println!("m matched")
-                //             }
-                //             if key.detail() == 0x3a {
-                //                 xcb::xproto::destroy_window(&conn, window);
-                //                 break;
-                //             }
-                //         }
-                //     } else {
-                //         xcb::xproto::destroy_window(&conn, window);
-                //         break;
-                //     }
-                // }
-                for window_text_id in window_text_ids.iter()
+            }
+            xcb::xproto::set_input_focus(
+                &conn,
+                xcb::xproto::INPUT_FOCUS_POINTER_ROOT as u8,
+                root,
+                xcb::CURRENT_TIME
+            );
+            conn.flush();
+
+            let mut letters = String::from("0987654321nbmvcxzytpoiurewqhglkjfdsa");
+            let mut window_text_ids: Vec<WinId> = vec![];
+            let mut client_ids:HashMap<char, WinId> = HashMap::new();
+            for workspace_index in wm.focused_workspaces().iter()
+            {
+                if let Some(workspace) = wm.workspace(
+                    &Selector::Index(*workspace_index))
                 {
-                    xcb::xproto::destroy_window(&conn, *window_text_id);
-                }
-                if let Ok(choosed) = choice_result
-                {
-                    if let Some(ch) = choosed.chars().next()
-                    {
-                        if let Some(&client_id) = client_ids.get(&ch)
+                    for client_id in workspace.client_ids().iter() {
+                        if let Some(letter) = letters.pop()
                         {
-                            let _ = wm.focus_client(&Selector::WinId(client_id));
+                            if let Some(window_text_id) = show_window_text(
+                                &conn, *client_id, letter.to_string().as_str())
+                            {
+                                window_text_ids.push(window_text_id);
+                                client_ids.insert(letter, *client_id);
+                            }
+                        } else {
+                            break;
                         }
                     }
                 }
+            }
+            let mut choice_result = None;
+            loop {
+                let ev = conn.wait_for_event();
+                if let Some(ev) = ev {
+                    match ev.response_type() & 0x7F {
+                        xcb::KEY_PRESS => {
+                            let key: &xcb::KeyPressEvent = unsafe {
+                                xcb::cast_event(&ev)
+                            };
+                            match key.detail() {
+                                9 => {break;},
+                                38 => choice_result = Some('a'),
+                                56 => choice_result = Some('b'),
+                                54 => choice_result = Some('c'),
+                                40 => choice_result = Some('d'),
+                                26 => choice_result = Some('e'),
+                                41 => choice_result = Some('f'),
+                                42 => choice_result = Some('g'),
+                                43 => choice_result = Some('h'),
+                                31 => choice_result = Some('i'),
+                                44 => choice_result = Some('j'),
+                                45 => choice_result = Some('k'),
+                                46 => choice_result = Some('l'),
+                                58 => choice_result = Some('m'),
+                                57 => choice_result = Some('n'),
+                                32 => choice_result = Some('o'),
+                                33 => choice_result = Some('p'),
+                                24 => choice_result = Some('q'),
+                                27 => choice_result = Some('r'),
+                                39 => choice_result = Some('s'),
+                                28 => choice_result = Some('t'),
+                                30 => choice_result = Some('u'),
+                                55 => choice_result = Some('v'),
+                                25 => choice_result = Some('w'),
+                                53 => choice_result = Some('x'),
+                                29 => choice_result = Some('y'),
+                                52 => choice_result = Some('z'),
+                                10 => choice_result = Some('1'),
+                                11 => choice_result = Some('2'),
+                                12 => choice_result = Some('3'),
+                                13 => choice_result = Some('4'),
+                                14 => choice_result = Some('5'),
+                                15 => choice_result = Some('6'),
+                                16 => choice_result = Some('7'),
+                                17 => choice_result = Some('8'),
+                                18 => choice_result = Some('9'),
+                                19 => choice_result = Some('0'),
+                                k => {
+                                    println!("ev key {}", k);
+                                    continue;
+                                }
+                            }
+                            break;
+                        }
+                        xcb::EXPOSE => {
+                            conn.flush();
+                        }
+                        xcb::MAPPING_NOTIFY => {
+                            conn.flush();
+                            break;
+                        }
+                        xcb::KEY_RELEASE => {
+                            conn.flush();
+                        }
+                        _ => {
+                            println!("ev code {}", ev.response_type());
+                            conn.flush();
+                        }
+                    }
+                } else {
+                    break;
+                }
+            }
+            {
+                let mut iters = 50;
+                let millis = time::Duration::from_millis(10);
+                loop
+                {
+                    if let Ok(_) = xcb::ungrab_keyboard_checked(
+                        &conn, xcb::CURRENT_TIME).request_check()
+                    {
+                        break;
+                    }
+                    thread::sleep(millis);
+                    iters -= 1;
+                    if iters <= 0
+                    {
+                        return Ok(());
+                    }
+                }
+            }
+            for window_text_id in window_text_ids.iter()
+            {
+                xcb::xproto::destroy_window(&conn, *window_text_id);
+            }
+            if let Some(ch) = choice_result {
+                if let Some(&client_id) = client_ids.get(&ch) {
+                    let _ = wm.focus_client(&Selector::WinId(client_id));
+                    return Ok(());
+                }
+            }
+            if let Some(client_id) = focused_client_id {
+                let _ = wm.focus_client(&Selector::WinId(client_id));
             }
             Ok(())
         });
@@ -399,8 +515,6 @@ fn main() -> penrose::Result<()> {
             }
             Ok(())
         });
-        "M-S-l" => run_internal!(drag_workspace, Forward);
-        "M-S-h" => run_internal!(drag_workspace, Backward);
         "M-bracketright" => run_internal!(cycle_layout, Forward);
         "M-bracketleft" => run_internal!(cycle_layout, Backward);
         "M-A-k" => run_internal!(update_max_main, More);
@@ -468,7 +582,6 @@ fn main() -> penrose::Result<()> {
     };
 
     let mut wm = new_xcb_backed_window_manager(config, hooks, logging_error_handler())?;
-    spawn("lbarstat")?;
     wm.grab_keys_and_run(key_bindings, mouse_bindings)?;
 
     Ok(())

@@ -3,6 +3,7 @@ use penrose::{
         client::Client,
         hooks::Hook,
         manager::WindowManager,
+        helpers::spawn,
         data_types::WinId,
         xconnection::XConn,
     },
@@ -37,6 +38,23 @@ impl<X: XConn> Hook<X> for CenterFloat {
             self.centered_above(c.id(), wm)?;
         }
 
+        Ok(())
+    }
+}
+
+pub struct StartupScript {
+}
+
+impl StartupScript {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+impl<X: XConn> Hook<X> for StartupScript {
+    fn startup(&mut self, wm: &mut WindowManager<X>) -> Result<()> {
+        let _ = wm.set_root_window_name("root");
+        let _ = spawn("lbarstat");
         Ok(())
     }
 }
