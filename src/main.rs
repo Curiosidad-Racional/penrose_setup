@@ -188,31 +188,8 @@ fn main() -> penrose::Result<()> {
         "M-S-k" => run_internal!(drag_client, Backward);
         "M-S-l" => run_internal!(drag_workspace, cycle_screen_direction);
         "M-S-h" => run_internal!(drag_workspace, cycle_screen_direction.reverse());
-        // "M-S-i" => Box::new(|wm: &mut WindowManager<_>| {
-        //     let _ = wm.rotate_clients(Forward);
-        //     Ok(())
-        // });
-        // "M-S-u" => Box::new(|wm: &mut WindowManager<_>| {
-        //     let _ = wm.rotate_clients(Backward);
-        //     Ok(())
-        // });
-        // "M-o" => Box::new(|wm: &mut WindowManager<_>| {
-        //     let mut client_ids: Vec<String> = vec![];
-        //     for workspace_index in wm.focused_workspaces().iter()
-        //     {
-        //         if let Some(workspace) = wm.workspace(
-        //             &Selector::Index(*workspace_index))
-        //         {
-        //             for client_id in workspace.client_ids().iter() {
-        //                 client_ids.push(client_id.to_string());
-        //             }
-        //         }
-        //     }
-        //     let _ = spawn_with_args(
-        //         "easyfocus_penrose",
-        //         &client_ids.iter().map(|s| &**s).collect::<Vec<&str>>());
-        //     Ok(())
-        // });
+        "M-S-i" => run_internal!(rotate_clients, Forward);
+        "M-S-u" => run_internal!(rotate_clients, Backward);
         "M-o" => Box::new(|wm: &mut WindowManager<_>| {
             let focused_client_id = wm.focused_client_id();
             let (conn, screen_i) = match xcb::Connection::connect(None)

@@ -1,11 +1,10 @@
 use penrose::{
     core::{
-        client::Client,
         hooks::Hook,
         manager::WindowManager,
         helpers::spawn,
-        data_types::WinId,
-        xconnection::XConn,
+        xconnection::{XConn, Xid},
+        ring::Selector,
     },
     Result,
 };
@@ -23,7 +22,7 @@ impl CenterFloat {
         })
     }
 
-    fn centered_above<X: XConn>(&self, id: WinId, wm: &mut WindowManager<X>) -> Result<()> {
+    fn centered_above<X: XConn>(&self, id: Xid, wm: &mut WindowManager<X>) -> Result<()> {
         if let Some(region) = wm.screen_size(wm.active_screen_index()) {
             let r = region.scale_w(self.scale).scale_h(self.scale);
             wm.position_client(id, r.centered_in(&region)?, true)?;
@@ -33,9 +32,9 @@ impl CenterFloat {
 }
 
 impl<X: XConn> Hook<X> for CenterFloat {
-    fn new_client(&mut self, wm: &mut WindowManager<X>, c: &mut Client) -> Result<()> {
-        if self.class_names.contains(&c.wm_class().to_string()) {
-            self.centered_above(c.id(), wm)?;
+    fn new_client(&mut self, wm: &mut WindowManager<X>, id: Xid) -> Result<()> {
+        if self.class_names.contains(&(wm.client(&Selector::WinId(id)).unwrap()).wm_class().to_string()) {
+            self.centered_above(id, wm)?;
         }
 
         Ok(())
