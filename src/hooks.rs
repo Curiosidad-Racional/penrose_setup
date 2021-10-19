@@ -1,5 +1,6 @@
 use penrose::{
     core::{
+        data_types::Region,
         hooks::Hook,
         manager::WindowManager,
         helpers::spawn,
@@ -10,22 +11,33 @@ use penrose::{
 };
 
 pub struct CenterFloat {
+    conn: xcb::Connection,
     class_names: Vec<String>,
-    scale: f64,
 }
 
 impl CenterFloat {
-    pub fn new(class_names: Vec<impl Into<String>>, scale: f64) -> Box<Self> {
+    pub fn new(class_names: Vec<impl Into<String>>) -> Box<Self> {
+        let (conn, _) = xcb::Connection::connect(None).unwrap();
         Box::new(Self {
+            conn,
             class_names: class_names.into_iter().map(|c| c.into()).collect(),
-            scale,
         })
     }
 
     fn centered_above<X: XConn>(&self, id: Xid, wm: &mut WindowManager<X>) -> Result<()> {
-        if let Some(region) = wm.screen_size(wm.active_screen_index()) {
-            let r = region.scale_w(self.scale).scale_h(self.scale);
-            wm.position_client(id, r.centered_in(&region)?, true)?;
+        if let Some(region) = wm.screen_size(wm.active_screen_index())
+        {
+            if let Ok(res) = xcb::get_geometry(&self.conn, id).get_reply()
+            {
+                let w = res.width() as u32;
+                let h = res.height() as u32;
+                wm.position_client(id, Region::new(
+                    region.x + (region.w - w) / 2,
+                    region.y + (region.h - h) / 2,
+                    w,
+                    h,
+                ), true)?;
+            }
         }
         wm.show_client(id)
     }
