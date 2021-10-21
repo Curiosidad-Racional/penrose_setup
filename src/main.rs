@@ -274,6 +274,17 @@ fn main() -> penrose::Result<()> {
         //     }
         //     Ok(())
         // });
+        "M-S-c" => Box::new(|wm: &mut WindowManager<_>| {
+            if let Some(id) = wm.focused_client_id()
+            {
+                if let Some(region) = wm.screen_size(wm.active_screen_index())
+                {
+                    let r = region.scale_w(0.9).scale_h(0.9);
+                    wm.position_client(id, r.centered_in(&region)?, true)?;
+                }
+            }
+            Ok(())
+        });
         "M-S-q" => run_internal!(kill_client);
         "M-S-f" => run_internal!(toggle_client_fullscreen, &Selector::Focused);
         "M-Tab" => run_internal!(toggle_workspace);
