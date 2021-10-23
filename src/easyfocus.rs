@@ -1,5 +1,3 @@
-extern crate xcb;
-
 use penrose::core::{
     data_types::WinId,
     manager::WindowManager,

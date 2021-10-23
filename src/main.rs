@@ -24,12 +24,13 @@ use penrose::{
     },
     Backward, Forward, Less, More,
 };
+use tracing::info;
 use simplelog::{LevelFilter, SimpleLogger};
 use std::{
     // io::Read,
     // process::{Command, Stdio},
     convert::TryFrom,
-    env,
+    env, fs,
 };
 // use dirs::home_dir;
 mod hooks;
@@ -117,10 +118,13 @@ fn main() -> penrose::Result<()> {
     let sp_term = Scratchpad::new("alacritty", 0.8, 0.8);
 
     let hooks: XcbHooks = vec![
-        Box::new(hooks::StartupScript::new()),
+        hooks::CustomHook::new(
+            &config.floating_classes().clone(),
+            &vec!["emacs", "Alacritty"].iter().map(|s| s.to_string()).collect(),
+            0.9
+        ),
         sp_term.get_hook(),
         Box::new(bar),
-        hooks::CenterFloat::new(config.floating_classes().clone()),
     ];
 
     let cycle_screen_direction = match env::var("HOME") {
@@ -402,6 +406,13 @@ fn main() -> penrose::Result<()> {
         "M-C-t" => Box::new(|wm: &mut WindowManager<_>| {
             if let Some(id) = wm.focused_client_id() {
                 spawn_with_args("transset", &["--id", &id.to_string(), "0.9"])
+            } else {
+                Ok(())
+            }
+        });
+        "M-A-t" => Box::new(|wm: &mut WindowManager<_>| {
+            if let Some(id) = wm.focused_client_id() {
+                spawn_with_args("transset", &["--id", &id.to_string(), "1"])
             } else {
                 Ok(())
             }

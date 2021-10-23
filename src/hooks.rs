@@ -3,24 +3,30 @@ use penrose::{
         data_types::Region,
         hooks::Hook,
         manager::WindowManager,
-        helpers::spawn,
+        helpers::{spawn, spawn_with_args},
         xconnection::{XConn, Xid},
         ring::Selector,
     },
     Result,
 };
 
-pub struct CenterFloat {
+pub struct CustomHook {
     conn: xcb::Connection,
-    class_names: Vec<String>,
+    class_names_center: Vec<String>,
+    class_names_opaque: Vec<String>,
+    opacity: f32
 }
 
-impl CenterFloat {
-    pub fn new(class_names: Vec<impl Into<String>>) -> Box<Self> {
+impl CustomHook {
+    pub fn new(class_names_center: &Vec<String>,
+               class_names_opaque: &Vec<String>,
+               opacity: f32) -> Box<Self> {
         let (conn, _) = xcb::Connection::connect(None).unwrap();
         Box::new(Self {
             conn,
-            class_names: class_names.into_iter().map(|c| c.into()).collect(),
+            class_names_center: class_names_center.into_iter().map(|c| c.into()).collect(),
+            class_names_opaque: class_names_opaque.into_iter().map(|c| c.into()).collect(),
+            opacity
         })
     }
 
@@ -43,29 +49,28 @@ impl CenterFloat {
     }
 }
 
-impl<X: XConn> Hook<X> for CenterFloat {
-    fn new_client(&mut self, wm: &mut WindowManager<X>, id: Xid) -> Result<()> {
-        if self.class_names.contains(&(wm.client(&Selector::WinId(id)).unwrap()).wm_class().to_string()) {
-            self.centered_above(id, wm)?;
-        }
-
-        Ok(())
-    }
-}
-
-pub struct StartupScript {
-}
-
-impl StartupScript {
-    pub fn new() -> Self {
-        Self {}
-    }
-}
-
-impl<X: XConn> Hook<X> for StartupScript {
+impl<X: XConn> Hook<X> for CustomHook {
     fn startup(&mut self, wm: &mut WindowManager<X>) -> Result<()> {
         let _ = wm.set_root_window_name("root");
         let _ = spawn("lbarstat");
+        Ok(())
+    }
+
+    fn new_client(&mut self, wm: &mut WindowManager<X>, id: Xid) -> Result<()> {
+        let client_class = match wm.client(&Selector::WinId(id)) {
+            Some(client) => client.wm_class().to_string(),
+            None => return Ok(())
+        };
+        if !self.class_names_opaque.contains(&client_class)
+        {
+            let _ = spawn_with_args("transset", &["--id", &id.to_string(), &self.opacity.to_string()]);
+        }
+
+        if self.class_names_center.contains(&client_class)
+        {
+            let _ = self.centered_above(id, wm);
+        }
+
         Ok(())
     }
 }
