@@ -123,12 +123,18 @@ fn main() -> penrose::Result<()> {
         hooks::CenterFloat::new(config.floating_classes().clone()),
     ];
 
-    let cycle_screen_direction = match env::var("MONITORS_LAYOUT") {
-        Ok(val) => {
-            match val.as_str() {
-                "left" => Backward,
-                "right" => Forward,
-                _ => Forward
+    let cycle_screen_direction = match env::var("HOME") {
+        Ok(home) => {
+            match fs::read_to_string(home + "/.screenlayout/.layout") {
+                Ok(content) =>  {
+                    info!("Layout file: {}", content);
+                    match content.as_str() {
+                        "left" => Backward,
+                        "right" => Forward,
+                        _ => Forward
+                    }
+                },
+                Err(_) => Forward
             }
         },
         Err(_) => Forward
