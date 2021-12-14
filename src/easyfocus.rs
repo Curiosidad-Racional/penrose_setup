@@ -39,7 +39,7 @@ fn show_window_text(
         let gc = conn.generate_id();
         xcb::xproto::create_gc(
             conn, gc, window,
-            &[(xcb::xproto::GC_FOREGROUND, 0xffff2cc4),
+            &[(xcb::xproto::GC_FOREGROUND, 0xffff5f74),
               (xcb::xproto::GC_BACKGROUND, 0xff000000),
               (xcb::xproto::GC_FONT, font)],
         );
@@ -72,7 +72,7 @@ where
         None => return Ok(()),
     };
     {
-        let mut iters = 50;
+        let mut retries = 20;
         let millis = time::Duration::from_millis(10);
         loop
         {
@@ -89,11 +89,11 @@ where
                 }
             };
             thread::sleep(millis);
-            iters -= 1;
-            if iters <= 0
+            if retries <= 0
             {
                 return Ok(());
             }
+            retries -= 1;
         }
     }
     xcb::xproto::set_input_focus(
@@ -201,21 +201,21 @@ where
         }
     }
     {
-        let mut iters = 50;
+        let mut retries = 20;
         let millis = time::Duration::from_millis(10);
         loop
         {
-            if let Ok(_) = xcb::ungrab_keyboard_checked(
-                &conn, xcb::CURRENT_TIME).request_check()
+            if xcb::ungrab_keyboard_checked(
+                &conn, xcb::CURRENT_TIME).request_check().is_ok()
             {
                 break;
             }
             thread::sleep(millis);
-            iters -= 1;
-            if iters <= 0
+            if retries <= 0
             {
                 return Ok(());
             }
+            retries -= 1;
         }
     }
     for window_text_id in window_text_ids.iter()

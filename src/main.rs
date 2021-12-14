@@ -2,40 +2,35 @@
 extern crate penrose;
 extern crate xcb;
 
+mod easyfocus;
+mod hooks;
+mod layouts;
+mod nvim;
+
 use penrose::{
-    contrib::{
-        layouts::paper,
-        extensions::Scratchpad,
-    },
+    contrib::{extensions::Scratchpad, layouts::paper},
     core::{
-        data_types::Region,
-        workspace::Workspace,
         bindings::MouseEvent,
         config::Config,
+        data_types::Region,
         helpers::spawn_with_args,
-        manager::WindowManager,
         layout::{bottom_stack, monocle, side_stack, Layout, LayoutConf},
+        manager::WindowManager,
         ring::Selector,
+        workspace::Workspace,
     },
     draw::{bar::dwm_bar, Color, TextStyle},
     logging_error_handler,
-    xcb::{
-        new_xcb_backed_window_manager, XcbDraw, XcbHooks
-    },
+    xcb::{new_xcb_backed_window_manager, XcbDraw, XcbHooks},
     Backward, Forward, Less, More,
 };
-use tracing::info;
 use simplelog::{LevelFilter, SimpleLogger};
 use std::{
     // io::Read,
     // process::{Command, Stdio},
     convert::TryFrom,
-    env, fs,
 };
 // use dirs::home_dir;
-mod hooks;
-mod layouts;
-mod easyfocus;
 
 const HEIGHT: usize = 18;
 
@@ -47,7 +42,6 @@ const WHITE: u32 = 0xebdbb2ff;
 // const PURPLE: u32 = 0xb16286ff;
 const BLUE: u32 = 0x458588ff;
 // const RED: u32 = 0xcc241dff;
-
 
 // fn spawn_for_output_with_args<S: Into<String>>(cmd: S, args: &[&str]) -> penrose::Result<String> {
 //     let cmd = cmd.into();
@@ -64,7 +58,6 @@ const BLUE: u32 = 0x458588ff;
 //         .read_to_string(&mut buff)
 //         .map(|_| buff)?)
 // }
-
 
 fn main() -> penrose::Result<()> {
     if let Err(e) = SimpleLogger::init(LevelFilter::Info, simplelog::Config::default()) {
@@ -87,14 +80,33 @@ fn main() -> penrose::Result<()> {
         .builder()
         .workspaces(vec!["1", "2", "3", "4", "5", "6", "7", "8", "9"])
         .floating_classes(vec!["rofi", "dmenu", "dunst", "yad", "gcr-prompter"])
+        .opaque_classes(vec!["emacs", "Alacritty"])
         .layouts(vec![
             Layout::new("[side]", LayoutConf::default(), side_stack, 1, 0.6),
-            Layout::new("[mono]", LayoutConf{
-                floating: false, gapless: true, follow_focus: true, allow_wrapping: true,
-            }, monocle, 1, 0.6),
-            Layout::new("[papr]", LayoutConf{
-                floating: false, gapless: true, follow_focus: true, allow_wrapping: false,
-            }, paper, 1, 0.6),
+            Layout::new(
+                "[mono]",
+                LayoutConf {
+                    floating: false,
+                    gapless: true,
+                    follow_focus: true,
+                    allow_wrapping: true,
+                },
+                monocle,
+                1,
+                0.6,
+            ),
+            Layout::new(
+                "[papr]",
+                LayoutConf {
+                    floating: false,
+                    gapless: true,
+                    follow_focus: true,
+                    allow_wrapping: false,
+                },
+                paper,
+                1,
+                0.6,
+            ),
             Layout::new("[dwdl]", LayoutConf::default(), layouts::dwindle, 1, 0.6),
             Layout::new("[botm]", LayoutConf::default(), bottom_stack, 1, 0.6),
         ])
@@ -119,43 +131,31 @@ fn main() -> penrose::Result<()> {
 
     let hooks: XcbHooks = vec![
         hooks::CustomHook::new(
-            &config.floating_classes().clone(),
-            &vec!["emacs", "Alacritty"].iter().map(|s| s.to_string()).collect(),
-            0.9
+            config.floating_classes().clone(),
+            config.opaque_classes().clone(),
         ),
         sp_term.get_hook(),
         Box::new(bar),
     ];
 
-    let cycle_screen_direction = match env::var("HOME") {
-        Ok(home) => {
-            match fs::read_to_string(home + "/.screenlayout/.layout") {
-                Ok(content) =>  {
-                    info!("Layout file: {}", content);
-                    match content.as_str() {
-                        "left" => Backward,
-                        "right" => Forward,
-                        _ => Forward
-                    }
-                },
-                Err(_) => Forward
-            }
-        },
-        Err(_) => Forward
-    };
-
     let key_bindings = gen_keybindings! {
         "M-j" => run_internal!(cycle_client, Forward);
         "M-k" => run_internal!(cycle_client, Backward);
-        "M-l" => run_internal!(cycle_screen, cycle_screen_direction);
-        "M-h" => run_internal!(cycle_screen, cycle_screen_direction.reverse());
+        "M-l" => run_internal!(cycle_screen, Forward);
+        "M-h" => run_internal!(cycle_screen, Backward);
         "M-S-j" => run_internal!(drag_client, Forward);
         "M-S-k" => run_internal!(drag_client, Backward);
-        "M-S-l" => run_internal!(drag_workspace, cycle_screen_direction);
-        "M-S-h" => run_internal!(drag_workspace, cycle_screen_direction.reverse());
+        "M-S-l" => run_internal!(drag_workspace, Forward);
+        "M-S-h" => run_internal!(drag_workspace, Backward);
         "M-S-i" => run_internal!(rotate_clients, Forward);
         "M-S-u" => run_internal!(rotate_clients, Backward);
         "M-o" => Box::new(&easyfocus::easyfocus);
+        "Caps_Lock" => Box::new(|_wm: &mut WindowManager<_>| {
+            nvim::command("highlight Normal ctermbg=darkRed guibg=darkRed")
+        });
+        "L-Caps_Lock" => Box::new(|_wm: &mut WindowManager<_>| {
+            nvim::command("highlight Normal ctermbg=NONE guibg=NONE")
+        });
         "M-S-Right" => Box::new(|wm: &mut WindowManager<_>| {
             if let Some(id) = wm.focused_client_id()
             {
@@ -284,6 +284,7 @@ fn main() -> penrose::Result<()> {
         //     }
         //     Ok(())
         // });
+        "M-c" => run_internal!(warp_cursor);
         "M-S-c" => Box::new(|wm: &mut WindowManager<_>| {
             if let Some(id) = wm.focused_client_id()
             {
@@ -404,18 +405,10 @@ fn main() -> penrose::Result<()> {
         "M-Prior" => run_external!("pactl set-sink-volume @DEFAULT_SINK@ +5%");
         "M-Next" => run_external!("pactl set-sink-volume @DEFAULT_SINK@ -5%");
         "M-C-t" => Box::new(|wm: &mut WindowManager<_>| {
-            if let Some(id) = wm.focused_client_id() {
-                spawn_with_args("transset", &["--id", &id.to_string(), "0.9"])
-            } else {
-                Ok(())
-            }
+            wm.set_win_opacity(wm.get_win_opacity() - 0.1)
         });
-        "M-A-t" => Box::new(|wm: &mut WindowManager<_>| {
-            if let Some(id) = wm.focused_client_id() {
-                spawn_with_args("transset", &["--id", &id.to_string(), "1"])
-            } else {
-                Ok(())
-            }
+        "M-S-t" => Box::new(|wm: &mut WindowManager<_>| {
+            wm.set_win_opacity(wm.get_win_opacity() + 0.1)
         });
         "M-S-b" => Box::new(|_: &mut WindowManager<_>| {
             spawn_with_args("sh", &["-c", "feh --bg-scale --randomize ~/Pictures/wallpapers/*.jpg"])
@@ -423,8 +416,8 @@ fn main() -> penrose::Result<()> {
         "M-Pause" => Box::new(|_: &mut WindowManager<_>| {
             spawn_with_args("xscreensaver-command", &["-lock"])
         });
-        "M-Return" => run_external!("ec");
-        "M-S-Return" => run_external!("alacritty");
+        "M-Return" => run_external!("ac");
+        "M-S-Return" => run_external!("ec");
         "M-A-Escape" => run_internal!(exit);
         "M-1" => run_internal!(focus_workspace, &Selector::Index(0));
         "M-S-1" => run_internal!(client_to_workspace, &Selector::Index(0));
