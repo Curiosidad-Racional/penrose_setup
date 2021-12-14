@@ -13,3 +13,4 @@ tracing = { version = "0.1", features = ["attributes", "log"] }
 simplelog = "^0.8"
 xcb = { version = "0.10.1" }
 # dirs = "^4.0"
+neovim-lib = "^0.6.1"
